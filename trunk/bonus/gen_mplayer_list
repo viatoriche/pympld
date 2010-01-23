@@ -1,0 +1,9 @@
+#!/bin/sh
+# crap-find-grep generator of playlist ^_^
+#
+
+find -type f | grep -i ".mp3"
+find -type f | grep -i ".ogg"
+find -type f | grep -i ".mkv"
+find -type f | grep -i ".avi"
+find -type f | grep -i ".mp4"

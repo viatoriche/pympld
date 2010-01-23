@@ -1,0 +1,12 @@
+#!/usr/bin/python
+# -*- coding: utf-8 -*-
+
+CONFIG_DIR='/path/to/mplayerd/'
+
+PATHTOMPLAYER='mplayer'
+MPLAYERPIPECMD=CONFIG_DIR+'pipecmdmpl'
+CMDMPL=CONFIG_DIR+'mplayercmd'
+PID_PYMPLAYER=CONFIG_DIR+'pymplayer.pid'
+PID_CTRLMPLD=CONFIG_DIR+'ctrlmpld.pid'
+MPLAYERSTDOUT=CONFIG_DIR+'mplout'
+PYMPLAYERLOG=CONFIG_DIR+'pymplayer.log'

@@ -1,0 +1,10 @@
+#!/bin/sh
+CONFIG_DIR='/home/viator/Programming/python/mplayerd/'
+MPLAYERSTDOUT=$CONFIG_DIR'mplout'
+
+killall pipemplrdr
+sleep 1
+startmpld
+echo 'Starting pipempl reader'
+pipemplrdr $MPLAYERSTDOUT &
+
