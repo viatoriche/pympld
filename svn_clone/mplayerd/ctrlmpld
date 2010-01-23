@@ -1,0 +1,118 @@
+#!/usr/bin/python
+
+# -*- coding: utf-8 -*-
+
+# Daemon read commands and send to pymplayer
+# License: GPL
+# Author: Viator (viator@xmpp.via-net.org)
+
+
+import time
+import os
+import select
+from config import *
+import signal
+
+# Variables:
+
+FD_MPLAYERPIPECMD=0
+POLL_FD_MPC=0
+IS_WORK=0
+IAM_LIVE=0
+
+# Funtion re-initialize daemon
+def me_init():
+    global FD_MPLAYERPIPECMD
+    global POLL_FD_MPC
+    global IS_WORK
+    global IAM_LIVE
+
+    print 'Starting daemon: Control Commands for PyMPlayer'
+    try:FD_MPLAYERPIPECMD=os.open(MPLAYERPIPECMD,os.O_WRONLY)
+    except: return 0
+    POLL_FD_MPC=select.poll()
+    POLL_FD_MPC.register(FD_MPLAYERPIPECMD,select.POLLOUT)
+    IS_WORK=1
+    me_start()
+    return 1
+
+def me_reinit(signum, frame):
+    global FD_MPLAYERPIPECMD
+    global POLL_FD_MPC
+    global IS_WORK
+    global IAM_LIVE
+    
+    print 'Reinitialization start...'
+    IS_WORK=0
+    while IAM_LIVE==1:pass
+    os.close(FD_MPLAYERPIPECMD)        
+    try: FD_MPLAYERPIPECMD=os.open(MPLAYERPIPECMD,os.O_WRONLY)
+    except: 
+       print 'Error: '+MPLAYERPIPECMD+' is not readable'
+       return 0
+    POLL_FD_MPC=select.poll()
+    POLL_FD_MPC.register(FD_MPLAYERPIPECMD,select.POLLOUT)
+    IS_WORK=1
+    print 'Reinitialization complete!'
+    me_start()
+    return 1
+
+def me_stop(signum, frame):
+    global FD_MPLAYERPIPECMD
+    global POLL_FD_MPC
+    global IS_WORK
+    global IAM_LIVE
+
+    print 'PANIC: Death Signal ['+str(signum)+'] Stop the work...'
+    IS_WORK=0
+    while IAM_LIVE==1:pass
+    os.close(FD_MPLAYERPIPECMD)
+    print 'Bye! Bye!'
+    return 1
+
+signal.signal(signal.SIGHUP, me_reinit)
+signal.signal(signal.SIGINT, me_stop)
+signal.signal(signal.SIGTERM, me_stop)
+
+def me_start():
+    global FD_MPLAYERPIPECMD
+    global POLL_FD_MPC
+    global IS_WORK
+    global IAM_LIVE
+
+    print 'Working...'
+    print 'CMDMPL='+CMDMPL
+    print 'FD_MPLAYERPIPECMD='+MPLAYERPIPECMD
+    IAM_LIVE=0
+    while IS_WORK==1:    
+        ev=POLL_FD_MPC.poll()
+        pl=ev[0][1]        
+        IAM_LIVE=1
+        if pl==select.POLLOUT:
+            try:F_CMD_MPL=open(CMDMPL,"r")
+            except:             
+                IAM_LIVE=0
+                time.sleep(1)
+                continue
+            cmd = F_CMD_MPL.readline()        
+            if cmd!='':
+                print "Send command: "+cmd.replace('\n','')          
+                os.write(FD_MPLAYERPIPECMD,cmd)             
+                F_CMD_MPL.close()
+                try:F_CMD_MPL=open(CMDMPL,"w")
+                except:
+                    IAM_LIVE=0
+                    time.sleep(1)
+                    continue
+                F_CMD_MPL.write("") 
+            F_CMD_MPL.close()
+        IAM_LIVE=0
+        time.sleep(1)
+
+if __name__ == '__main__':
+    MY_PID=os.getpid()
+    fpidfile=open(PID_CTRLMPLD,'w')
+    fpidfile.write(str(MY_PID))
+    fpidfile.close()
+
+    if me_init()==0:print 'Exit...'

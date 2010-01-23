@@ -1,0 +1,482 @@
+#!/usr/bin/python
+
+# -*- coding: utf-8 -*-
+
+# Command front-end for MPlayer -slave -idle
+# License: GPL
+# Author: Viator (xmpp: viator@xmpp.via-net.org | mail:viator@via-net.org)
+
+
+import os
+import select
+import subprocess
+import time
+import threading
+from config import *
+import signal
+import sys    
+
+
+# Variables
+
+cmdlist = """
+[Mplayer commands]
+
+seek                 Float [Integer]
+edl_mark            
+audio_delay          Float [Integer]
+speed_incr           Float
+speed_mult           Float
+speed_set            Float
+quit                 [Integer]
+stop                
+pause               
+frame_step          
+pt_step              Integer [Integer]
+pt_up_step           Integer [Integer]
+alt_src_step         Integer
+loop                 Integer [Integer]
+sub_delay            Float [Integer]
+sub_step             Integer [Integer]
+osd                  [Integer]
+osd_show_text        String [Integer] [Integer]
+osd_show_property_te String [Integer] [Integer]
+volume               Float [Integer]
+balance              Float [Integer]
+use_master          
+mute                 [Integer]
+contrast             Integer [Integer]
+gamma                Integer [Integer]
+brightness           Integer [Integer]
+hue                  Integer [Integer]
+saturation           Integer [Integer]
+frame_drop           [Integer]
+sub_pos              Integer [Integer]
+sub_alignment        [Integer]
+sub_visibility       [Integer]
+sub_load             String
+sub_remove           [Integer]
+vobsub_lang          [Integer]
+sub_select           [Integer]
+sub_source           [Integer]
+sub_vob              [Integer]
+sub_demux            [Integer]
+sub_file             [Integer]
+sub_log             
+sub_scale            Float [Integer]
+ass_use_margins      [Integer]
+get_percent_pos     
+get_time_pos        
+get_time_length     
+get_file_name       
+get_video_codec     
+get_video_bitrate   
+get_video_resolution
+get_audio_codec     
+get_audio_bitrate   
+get_audio_samples   
+get_meta_title      
+get_meta_artist     
+get_meta_album      
+get_meta_year       
+get_meta_comment    
+get_meta_track      
+get_meta_genre      
+switch_audio         [Integer]
+switch_angle         [Integer]
+switch_title         [Integer]
+tv_start_scan       
+tv_step_channel      Integer
+tv_step_norm        
+tv_step_chanlist    
+tv_set_channel       String
+tv_last_channel     
+tv_set_freq          Float
+tv_step_freq         Float
+tv_set_norm          String
+tv_set_brightness    Integer [Integer]
+tv_set_contrast      Integer [Integer]
+tv_set_hue           Integer [Integer]
+tv_set_saturation    Integer [Integer]
+forced_subs_only     [Integer]
+dvb_set_channel      Integer Integer
+switch_ratio         [Float]
+vo_fullscreen        [Integer]
+vo_ontop             [Integer]
+file_filter          Integer
+vo_rootwin           [Integer]
+vo_border            [Integer]
+screenshot           [Integer]
+panscan              Float [Integer]
+switch_vsync         [Integer]
+loadfile             String [Integer]
+loadlist             String [Integer]
+run                  String
+change_rectangle     Integer Integer
+teletext_add_dec     String
+teletext_go_link     Integer
+dvdnav               String
+get_vo_fullscreen   
+get_sub_visibility  
+key_down_event       Integer
+set_property         String String
+get_property         String
+step_property        String [Float] [Integer]
+seek_chapter         Integer [Integer]
+set_mouse_pos        Integer Integer
+
+[PyMPlayer commands]
+
+exit
+cmdlist - show it
+j [Value]- Next track in playlist
+k [Value]- Prev track in playlist
+J [Value=1]*10 - Page Down
+K [Value=1]*10 - Page Up
+o filename - play filename or URL
+p playlist - play playlist
+v 0..100 - volume
+l [Value=5] + sec position stream
+L [Value=1]*10 + sec position stream
+h [Value=5] - sec position stream
+H [Value=1]*10 -sec position stream
+# 0..100% - position
+@ 1..max - real seconds
+pl - view playlist
+rp - replay last file/playlist
+mpl (or mplayer) argvs - restart mplayer with new argvs
+"""
+
+PIPEOUT=''
+PIPEFD=''
+POLL=''
+IAM_LIVE=0
+IS_WORK=0
+MPLAYER=0
+CURRENTMPLAYERCMD=[]
+
+def pipewrite(txt):    
+    global IS_WORK
+    global IAM_LIVE    
+    global PIPEFD
+    global POLL
+
+    ev=POLL.poll()
+    while IS_WORK==1:
+       pl=ev[0][1]       
+       if pl==select.POLLOUT:
+           os.write(PIPEFD,txt)           
+           break
+
+def pipewriter(out):        
+    global PIPEOUT  
+
+    if PIPEOUT=='':return
+    
+    for i in out:
+        pipewrite(i)
+
+def readlines_t(mpl):        
+    global IS_WORK
+    global IAM_LIVE
+    
+    class ThrdStdIn(threading.Thread):
+        def run(self):
+            while IS_WORK==1:                                                
+                out=mpl.readlines(1)
+                if out==['death']: 
+                    break
+                     
+                elif out<>[]:
+                    for i in out:
+                        ii = i.replace('\n','')
+                        cmd = ''
+                        print ii            
+                    pipewriter(out)                               
+
+    ThrdStdIn().start()
+
+
+class MPlayer(object):
+    
+
+    def __init__(self):
+        self._mplayer = subprocess.Popen(
+                CURRENTMPLAYERCMD,
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+        self.i_am_live = 1        
+
+    def readlines(self,count):        
+        
+        ret = []
+        for i in xrange(count):            
+            if self.checklive()==0:
+                ret=['death']
+                self.i_am_live = 0                
+                break
+            txt=self._mplayer.stdout.readline() 
+            ret.append(txt)
+            
+        return ret
+
+    def command(self, name):        
+        """ Very basic interface [see populate()]
+        Sends command 'name' to process, with given args
+        """
+        cmd = name+'\n'
+        if self.i_am_live == 1: self._mplayer.stdin.write(cmd)
+        return self.i_am_live
+    
+    def checklive(self):
+        return self._mplayer.poll()
+
+    def killmplayer(self):
+        self._mplayer.kill()
+
+playlist = []
+
+def getplaylist(path):
+    global playlist
+    playlist=[]
+    
+    print path
+    try:f=open(path,'r')
+    except:return 0
+    
+    while 1:
+        song=f.readline()
+        if song=='':break
+        song=song.replace('\n','')        
+        playlist.append(song)
+        
+ 
+    f.close()
+    return 1
+    
+def viewplaylist():
+    if len(playlist)>0:
+        i=0
+        for song in playlist:
+            i=i+1
+            n=str(i)
+            pos = 10-len(n)
+            if pos<0: pos=0
+            sp=''
+            for j in xrange(pos):sp=sp+' '
+            n=sp+n
+            print n+' * '+song
+
+def getCURRENTMPLAYERCMD(argvs):
+    global CURRENTMPLAYERCMD
+    global PIPEOUT
+    exe_name = PATHTOMPLAYER
+
+    CURRENTMPLAYERCMD=[]
+
+    CURRENTMPLAYERCMD.append(exe_name)
+    CURRENTMPLAYERCMD.append('-slave')
+    CURRENTMPLAYERCMD.append('-quiet')
+    CURRENTMPLAYERCMD.append('-idle')
+
+    # pymplayer [pymplayer argvs] -- [mplayer argvs]
+
+    if len(argvs)>1:
+        argvs=argvs[1:]
+        mplparams=0
+        getpipeout=0
+        for ar in argvs:
+            if mplparams==0:
+                if ar=='--':mplparams=1
+                else: # pymplayer argvs
+                    if (ar=='-out')and(PIPEOUT==''): getpipeout=1
+                    elif getpipeout==1: 
+                        PIPEOUT=ar
+                        getpipeout=0
+                    else: print "Unknown param: "+ar
+            else: CURRENTMPLAYERCMD.append(ar) # mplayer argvs
+    else: print "Usage: pymplayer [-out pipeoutfile] [-- mplayer_argvs]"
+
+
+def me_init():
+    global PIPEOUT
+    global PIPEFD
+    global POLL
+    global IS_WORK
+
+    getCURRENTMPLAYERCMD(sys.argv)
+    if PIPEOUT<>'':
+        PIPEFD=os.open(PIPEOUT,os.O_WRONLY)
+        POLL=select.poll()
+        POLL.register(PIPEFD,select.POLLOUT)
+
+    IS_WORK=1
+    me_start()
+    return 1
+
+
+def me_start(): 
+    global PIPEOUT
+    global PIPEFD
+    global POLL
+    global MPLAYER
+   
+    cmd = ''
+    name = ''
+    memcmd = ''
+    
+    print 'Hello, PyMPLayer is ready to work. Input cmdlist for read commands list.'
+    while IS_WORK==1:
+        print 'Run mplayer slave-session:'
+        MPLAYER = MPlayer()
+        import readline
+        readline.parse_and_bind('tab: complete')
+        import rlcompleter
+        readlines_t(MPLAYER)        
+        if cmd <> '':
+            if MPLAYER.command(cmd)==0:continue
+            else: cmd=''            
+        try:
+            while IS_WORK==1:            
+                try: cmd = raw_input('% ')
+                except: break
+                if cmd == '':
+                    continue                
+            
+                lcmd = cmd.split()
+                name=lcmd[0]                         
+                
+                if name == 'cmdlist':
+                    print cmdlist
+            
+                if name == 'quit':
+                    MPLAYER.command('quit')
+                    break
+
+                if name == 'exit':
+                    MPLAYER.command('quit')
+                    print 'Exiting...'
+                    break
+
+                if (name == 'mpl')or(name == 'mplayer'):                    
+                    argvs = ['','--']                                        
+                    argvs=argvs+lcmd[1:]                    
+                    getCURRENTMPLAYERCMD(argvs)
+                    break
+                    
+
+                if name == 'j':
+                    if len(lcmd)>1: cmd = 'pt_step +'+lcmd[1]
+                    else: cmd = 'pt_step +1'
+
+                if name == 'J':
+                    if len(lcmd)>1:
+                        try:val = str(int(lcmd[1])*10)
+                        except: val = '10'
+                        cmd = 'pt_step +'+val
+                    else: cmd = 'pt_step +10'
+
+                if name == 'K':
+                    if len(lcmd)>1:
+                        try:val = str(int(lcmd[1])*10)
+                        except: val = '10'
+                        cmd = 'pt_step -'+val
+                    else: cmd = 'pt_step -10'
+            
+                if name == 'k':
+                    if len(lcmd)>1: cmd = 'pt_step -'+lcmd[1]
+                    else: cmd = 'pt_step -1'
+                
+                   
+                if name == 'o':
+                    cmd = 'loadfile'+cmd[1:]
+                    memcmd = cmd
+                
+                if name == 'loadlist':
+                    if getplaylist(cmd.replace('loadlist ',''))==0: print 'error'
+                    else: memcmd = cmd
+
+                if name == 'p':
+                    if getplaylist(cmd[2:])==0: print 'error'                    
+                    cmd = 'loadlist'+cmd[1:]
+                    memcmd = cmd
+
+                if name == 'pl':
+                    viewplaylist()
+                    continue
+
+                if name == 'rp':
+                    cmd = memcmd
+
+                if name == 'v':
+                    if len(lcmd)>1: cmd = 'volume '+lcmd[1]+' 1 1'
+                    else: cmd = 'volume 100 1 1'
+
+                if name == 'l':
+                    if len(lcmd)>1: cmd = 'seek +'+lcmd[1]+' 0'
+                    else: cmd = 'seek +5 0'
+               
+                if name == 'L':
+                    if len(lcmd)>1:
+                        try:val = str(int(lcmd[1])*10)
+                        except: val = '10'
+                        cmd = 'seek +'+val+' 0'
+                    else: cmd = 'seek +10 0'
+                
+                if name == 'h':
+                    if len(lcmd)>1: cmd = 'seek -'+lcmd[1]+' 0'
+                    else: cmd = 'seek -5 0'
+
+                if name == 'H':
+                    if len(lcmd)>1:
+                        try:val = str(int(lcmd[1])*10)
+                        except: val = '10'
+                        cmd = 'seek -'+val+' 0'
+                    else: cmd = 'seek -10 0'                
+
+                if name == '#':
+                    if len(lcmd)>1: cmd = 'seek '+lcmd[1]+' 1'
+                    else: cmd = 'seek 0 1'
+                
+                if name == '@':
+                    if len(lcmd)>1: cmd = 'seek '+lcmd[1]+' 2'
+                    else: cmd = 'seek 1 2'
+
+                cmd = cmd.replace('\n','')
+
+                if MPLAYER.command(cmd)==0:                    
+                    break
+                
+
+        
+        finally:
+            pass    
+
+        time.sleep(1)
+        if name == 'exit':
+            quit()
+            break
+
+def me_stop(signum, frame):
+    global MPLAYER
+    global IS_WORK
+    global PIPEOUT
+    
+    print 'SIGNAL ['+str(signum)+'] Stopping...'
+
+    IS_WORK=0
+    MPLAYER.killmplayer()
+    if PIPEOUT<>'':os.close(PIPEFD)
+    sys.exit()
+   
+
+
+if __name__ == '__main__': 
+    MY_PID=os.getpid()
+    fpidfile=open(PID_PYMPLAYER,'w')
+    fpidfile.write(str(MY_PID))
+    fpidfile.close()
+
+    signal.signal(signal.SIGINT, me_stop)
+    signal.signal(signal.SIGTERM, me_stop)
+    me_init()
+

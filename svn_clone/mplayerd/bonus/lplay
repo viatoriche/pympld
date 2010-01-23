@@ -1,0 +1,5 @@
+#!/bin/sh
+# Play playlist-file
+# example: lplay filename.list
+
+mpc p "`pwd`/$1"

@@ -1,0 +1,6 @@
+#!/bin/sh
+# scrobbler runner
+# $1 - File FIFO STDOUT mplayer
+#
+
+pipescrobbler <$1 >/home/viator/mplayer.log
