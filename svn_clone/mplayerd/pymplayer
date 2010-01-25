@@ -14,6 +14,7 @@ import time
 import threading
 import signal
 import sys    
+import string
 from config import *
 
 
@@ -145,6 +146,9 @@ H [Value=1]*10 -sec position stream
 pl - view playlist
 rp - replay last file/playlist
 mpl (or mplayer) argvs - restart mplayer with new argvs
+next [n] - history next navigation -> (files, playlists)
+prev [n] - histery prev navigation
+vh - view all play history
 """
 
 PIPEOUT = ''
@@ -154,6 +158,8 @@ IAM_LIVE = 0
 IS_WORK = 0
 MPLAYER = 0
 CURRENTMPLAYERCMD = []
+PLAY_HISTORY=[]
+PLAY_HISTORY_POSITION=0
 
 # write line to pipe
 def pipewrite(text_write):
@@ -248,6 +254,38 @@ def getplaylist(path):
  
     fplaylist.close()
     return 1
+
+def view_play_history():
+    for hist_item in PLAY_HISTORY:
+        print hist_item
+
+def add_play_history(value):
+    global PLAY_HISTORY    
+    global PLAY_HISTORY_POSITION
+    if value != '': 
+        PLAY_HISTORY.append(value)
+        PLAY_HISTORY_POSITION = len(PLAY_HISTORY)-1
+
+
+def get_prev_history(increm):
+    global PLAY_HISTORY_POSITION
+    c_increm = 1
+    if increm != '':    
+        try: c_increm = int(increm)
+        finally: pass
+    PLAY_HISTORY_POSITION = PLAY_HISTORY_POSITION-c_increm    
+    if PLAY_HISTORY_POSITION == -1: PLAY_HISTORY_POSITION = len(PLAY_HISTORY)-1
+    return PLAY_HISTORY[PLAY_HISTORY_POSITION]
+
+def get_next_history(increm):
+    global PLAY_HISTORY_POSITION
+    c_increm = 1
+    if increm != '':    
+        try: c_increm = int(increm)
+        finally: pass
+    PLAY_HISTORY_POSITION = PLAY_HISTORY_POSITION+c_increm    
+    if PLAY_HISTORY_POSITION == len(PLAY_HISTORY): PLAY_HISTORY_POSITION = 0
+    return PLAY_HISTORY[PLAY_HISTORY_POSITION]
     
 def viewplaylist():
     if len(PLAYLIST) > 0:
@@ -333,10 +371,16 @@ def me_start():
                 try: cmd = raw_input('% ')
                 except: break
                 
+                cmd = cmd.strip()
+
                 if cmd == '': continue                
             
                 lcmd = cmd.split()
-                name = lcmd[0]                         
+                name = lcmd[0]  
+                params_cmd=''
+                if len(lcmd) > 1:
+                    params_cmd = string.join(lcmd[1:])
+                    params_cmd = params_cmd.strip()
                 
                 if name == 'cmdlist':
                     print CMDLIST
@@ -350,88 +394,104 @@ def me_start():
                     print 'Exiting...'
                     break
 
-                if (name == 'mpl') or (name == 'mplayer'):                    
-                    argvs = ['', '--']                                        
-                    argvs = argvs+lcmd[1:]                    
+                if (name == 'mpl') or (name == 'mplayer'):                   
+                    argvs = ['', '--']
+                    if params_cmd == '': argvs = argvs+lcmd[1:]
                     getCURRENTMPLAYERCMD(argvs)
                     break
                     
 
-                if name == 'j':
-                    if len(lcmd)>1: cmd = 'pt_step +'+lcmd[1]
+                if name == 'j':                    
+                    if params_cmd != '': cmd = 'pt_step +'+params_cmd
                     else: cmd = 'pt_step +1'
 
                 if name == 'J':
-                    if len(lcmd) > 1:
-                        try: val = str(int(lcmd[1])*10)
+                    if params_cmd != '':
+                        try: val = str(int(params_cmd)*10)
                         except: val = '10'
                         cmd = 'pt_step +'+val
                     else: cmd = 'pt_step +10'
 
                 if name == 'K':
-                    if len(lcmd) > 1:
-                        try: val = str(int(lcmd[1])*10)
+                    if params_cmd != '':
+                        try: val = str(int(params_cmd)*10)
                         except: val = '10'
                         cmd = 'pt_step -'+val
                     else: cmd = 'pt_step -10'
             
                 if name == 'k':
-                    if len(lcmd) > 1: cmd = 'pt_step -'+lcmd[1]
+                    if params_cmd != '': cmd = 'pt_step -'+params_cmd
                     else: cmd = 'pt_step -1'
                 
                    
-                if name == 'o':
-                    cmd = 'loadfile'+cmd[1:]
+                if name == 'o':                    
+                    cmd = 'loadfile '+params_cmd
                     memcmd = cmd
+                    add_play_history(cmd)
                 
                 if name == 'loadlist':
                     if getplaylist(cmd.replace('loadlist ',''))==0: print 'error'
-                    else: memcmd = cmd
+                    else: 
+                        memcmd = cmd
+                        add_play_history(cmd)
 
                 if name == 'p':
                     if getplaylist(cmd[2:])==0: print 'error'                    
-                    cmd = 'loadlist'+cmd[1:]
+                    cmd = 'loadlist '+params_cmd
                     memcmd = cmd
+                    add_play_history(cmd)
 
                 if name == 'pl':
                     viewplaylist()
+                    continue
+ 
+                if name == 'vh':
+                    view_play_history()
                     continue
 
                 if name == 'rp':
                     cmd = memcmd
 
+                if name == 'prev':
+                    cmd = get_prev_history(params_cmd)
+                    memcmd = cmd
+
+                if name == 'next':
+                    cmd = get_next_history(params_cmd)
+                    memcmd = cmd
+
                 if name == 'v':
-                    if len(lcmd) > 1: cmd = 'volume '+lcmd[1]+' 1 1'
+                    if params_cmd != '': cmd = 'volume '+params_cmd+' 1 1'
                     else: cmd = 'volume 100 1 1'
 
                 if name == 'l':
-                    if len(lcmd) > 1: cmd = 'seek +'+lcmd[1]+' 0'
+                    if params_cmd != '': cmd = 'seek +'+params_cmd+' 0'
                     else: cmd = 'seek +5 0'
                
                 if name == 'L':
-                    if len(lcmd) > 1:
-                        try: val = str(int(lcmd[1])*10)
+                    if params_cmd != '':
+                        try: val = str(int(params_cmd)*10)
                         except: val = '10'
                         cmd = 'seek +'+val+' 0'
                     else: cmd = 'seek +10 0'
                 
                 if name == 'h':
-                    if len(lcmd) > 1: cmd = 'seek -'+lcmd[1]+' 0'
+                    if params_cmd != '': cmd = 'seek -'+params_cmd+' 0'
                     else: cmd = 'seek -5 0'
 
                 if name == 'H':
-                    if len(lcmd) > 1:
-                        try: val = str(int(lcmd[1])*10)
+                    if params_cmd != '':
+                        try: val = str(int(params_cmd)*10)
                         except: val = '10'
                         cmd = 'seek -'+val+' 0'
                     else: cmd = 'seek -10 0'                
 
                 if name == '#':
-                    if len(lcmd) > 1: cmd = 'seek '+lcmd[1]+' 1'
+                    if params_cmd != '': cmd = 'seek '+params_cmd+' 1'
                     else: cmd = 'seek 0 1'
                 
                 if name == '@':
-                    if len(lcmd) > 1: cmd = 'seek '+lcmd[1]+' 2'
+                    if params_cmd != '': cmd = 'seek '+params_cmd+' 2'
                     else: cmd = 'seek 1 2'
 
                 cmd = cmd.replace('\n', '')
