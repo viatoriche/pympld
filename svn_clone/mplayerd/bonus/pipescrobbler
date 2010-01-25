@@ -47,6 +47,7 @@ do
       if [ "$tmp" != ""  ]
         then
           file=`echo $tmp | sed -e "s/Воспроизведение\ //"`
+          isradio="False"
       fi
       tmp=`echo $info | grep "Playing"`
       if [ "$tmp" != ""  ]
