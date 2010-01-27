@@ -1,5 +1,5 @@
 #!/bin/sh
-CONFIG_DIR='/home/viator/src/pympld/trunk/'
+CONFIG_DIR='/home/viator/Programming/python/mplayerd/'
 MPLAYERSTDOUT=$CONFIG_DIR'mplout'
 
 killall pipemplrdr

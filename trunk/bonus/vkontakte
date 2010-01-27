@@ -1,0 +1,3 @@
+#!/bin/sh
+vkgenlist "$*" > /tmp/vk.list
+mpc p /tmp/vk.list
