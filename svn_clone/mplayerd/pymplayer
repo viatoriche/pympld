@@ -380,6 +380,7 @@ def me_start():
                 params_cmd=''
                 if len(lcmd) > 1:
                     params_cmd = string.join(lcmd[1:])
+#                    params_cmd = lcmd[1:].join()
                     params_cmd = params_cmd.strip()
                 
                 if name == 'cmdlist':

@@ -1,5 +1,5 @@
 #!/bin/sh
-CONFIG_DIR='/home/viator/src/pympld/svn_clone/mplayerd/'
+CONFIG_DIR='/path/to/mplayerd/'
 MPLAYERSTDOUT=$CONFIG_DIR'mplout'
 
 killall pipemplrdr
