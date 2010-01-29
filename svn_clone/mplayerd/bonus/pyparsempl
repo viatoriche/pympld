@@ -84,9 +84,10 @@ def parse_mplayer_work():
 
         if line.find(EV_PLAYING) != -1:
             P_FILENAME = line.replace(EV_PLAYING+' ','')            
+            P_GENRE = ''
+            IS_RADIO = 0
 
         if line.find(EV_STREAM) != -1:
-            SHOW = 1
             parsetext = line.replace('ICY Info: StreamTitle=\'','')
             parsetext = parsetext.replace('\';','')
             parsetext = parsetext.replace('StreamUrl=\'',' ')
