@@ -7,6 +7,7 @@ import time
 from config import *
 
 
+"""
 print '(Re)Starting mplayerd'
 
 print 'Stop pymplayer'
@@ -38,7 +39,9 @@ try:
 except: pass
 
 time.sleep(2)
+"""
 
+os.system('stopmpld')
 print 'Starting pymplayer'
 os.system('pymplayer -out '+MPLAYERSTDOUT+' < '+MPLAYERPIPECMD+' 2>/tmp/mplerr >'+PYMPLAYERLOG+'&')
 print 'Starting ctrlmpld'

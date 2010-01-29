@@ -3,4 +3,4 @@
 # $1 - File FIFO STDOUT mplayer
 #
 
-pipescrobbler <$1 >/home/viator/mplayer.log
+pyparsempl <"$1" >$HOME/mplayer.log
