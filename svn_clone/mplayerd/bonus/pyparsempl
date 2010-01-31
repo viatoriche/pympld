@@ -1,12 +1,33 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 
+'''
+Parser STDOUT for MPlayer
+License: GPL
+Author: Viator
+mail: viator@via-net.org
+xmpp: viator@xmpp.via-net.org
+
+Example:
+  1) mplayer | pyparsempl
+  2) mplayer > fifo.file  //  pyparsempld < fifo.file
+
+For scrobbling to lastfm:
+  1) Install the lastfmsubmitd -- http://www.red-bean.com/decklin/lastfmsubmitd/
+  2) Make symlink (in PATH dir): lastfm -> /usr/lib/lastfmsubmitd/lastfmsubmit
+  3) config: SCROBBLE = 1
+
+Support languages for stdin: RU/EN, see LANG option
+
+
+'''
+
 # config_start
 
 SCROBBLE = 1 # 1 - On / 0 - Off
 LANG = 'RU'
-YOUR_COMMANDS = 1 # show def user_commands() if = 1 / 0 - off
 # LANG = 'EN'
+YOUR_COMMANDS = 1 # show def user_commands() if = 1 / 0 - off
 
 # config_end
 
