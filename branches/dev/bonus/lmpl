@@ -1,0 +1,9 @@
+#!/bin/sh
+
+echo "" > list.ls
+ls | grep -i .mp3 >> list.ls
+ls | grep -i .ogg >> list.ls
+ls | grep -i .mkv >> list.ls
+ls | grep -i .avi >> list.ls
+ls | grep -i .mp4 >> list.ls
+lplay "list.ls"

@@ -1,0 +1,11 @@
+#!/usr/bin/python
+# -*- coding: utf-8 -*-
+# Start mplayerd
+
+import os
+import time
+from config import *
+
+os.system('stopmpld 15')
+print 'Starting pymplayer'
+os.system('pymplayer -out '+MPLAYERSTDOUT+' -in '+MPLAYERPIPECMD+' -log '+PYMPLAYERLOG+' -pidon -- -fs 2>/tmp/mplerr > /dev/null&')

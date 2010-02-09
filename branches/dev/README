@@ -1,0 +1,22 @@
+mplayerd this is a try create daemonized service this control by pipes
+author Viator
+xmpp: viator@xmpp.via-net.org
+mail: viator@via-net.org
+
+Warning!
+
+Software is not complete, READ SOURCES RECOMMENDED!
+
+Files:
+
+./bonus/pipescrobbler - 
+./bonus/pipemplrdr - read the pymplayer stdout and send to pipescrobbler
+./config.py - config pymplayer and ctrlmpld 
+./pymplayer - pymplayer / commands front-end to -slave mplayer
+./mpc - command sender
+./mpld - start/reload sh-scripts
+./startmpld - python starter pymplayer+ctrlmpld
+./stopmpld - python stoper pymplayer+ctrlmpld
+./ctrlmpld - service sender commands to pipe pymplayer
+./remove.sh - sh-script delete symlinks and fifo-files
+./install.sh - sh-script install symlinks and fifo-files

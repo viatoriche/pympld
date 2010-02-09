@@ -1,0 +1,8 @@
+#!/bin/sh
+fn=/tmp/vkbashcookies-$RANDOM
+umask 0077
+read username password < ~/.config/vklogin.cfg
+vklogin "$username" "$password" "$fn"
+
+echo `vkfindaudio "$fn" "$*"`
+rm $fn

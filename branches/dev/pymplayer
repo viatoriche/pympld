@@ -1,0 +1,921 @@
+#!/usr/bin/python
+
+# -*- coding: utf-8 -*-
+
+# Command front-end for MPlayer -slave -idle
+# License: GPL
+# Author: Viator (xmpp: viator@xmpp.via-net.org | mail:viator@via-net.org)
+
+import os
+import select
+import subprocess
+import time
+import threading
+import signal
+import sys
+import string
+import select
+from config import *
+
+# Variables
+
+CMDLIST = """
+[PyMPlayer commands]
+
+exit
+cmdlist - show it
+j [Value]- Next track in playlist
+k [Value]- Prev track in playlist
+J [Value=1]*10 - Page Down
+K [Value=1]*10 - Page Up
+o [-a - append] filename - play filename or URL
+p [-a - append] playlist - play playlist
+v 0..100 - volume
+l [Value=5] + sec position stream
+L [Value=1]*10 + sec position stream
+h [Value=5] - sec position stream
+H [Value=1]*10 -sec position stream
+# 0..100% - position
+@ 1..max - real seconds
+g Value - go to Value song in playlist
+pl [begin:end(int)] - view playlist / pl count(string) - view counts / all - all playlist
+rm [begin:end(int)] - remove songs from playlist
+rp - replay last file/playlist
+mpl (or mplayer) argvs - restart mplayer with new argvs
+next [n] - history next navigation -> (files, playlists)
+prev [n] - histery prev navigation
+vh - view all play history
+rep [0 - off, 1 - all(default), 2 - current] - repeat mode
+info - view info about current song
+filter - on/off
+"""
+
+FILTER = 1 # filter stdout mplayer
+PIPEOUT = ''
+PIPEIN = ''
+SAVELOG = ''
+PIPEFD = ''
+POLL = None
+IAM_LIVE = 0
+IS_WORK = 0
+MPLAYER = 0
+CURRENTMPLAYERCMD = []
+PLAY_HISTORY=[]
+PLAY_HISTORY_POSITION=0
+CURRENT_POS_PL = 0
+REPEAT = 1 # 0 - off, 1 - all, 2 - current
+PLAYLIST = []
+PLAYNOW = 0
+RADIO_MODE = 0
+MEMCMD = ''
+FLAG_GET_PERCENT = 0
+PID_ENABLED = 0
+
+# write line to pipe
+
+def pipewrite(text_write):
+
+    event = POLL.poll()
+    while IS_WORK == 1:
+        pl_result = event[0][1]
+        if pl_result == select.POLLOUT:
+            os.write(PIPEFD, text_write)
+            break
+
+# write text to pipe
+def pipe_writer(out_text):
+
+    if PIPEOUT == '':
+        return
+    
+    for i in out_text:
+        pipewrite(i)
+
+# ANS_PERCENT_POSITION
+# get_percent_pos
+
+def read_cmd_from_fifo(mpl):
+    if PIPEIN == '': return
+    class ThrdFifoReader(threading.Thread):
+
+        def run(self):
+            while IS_WORK == 1:
+                try: FD_MPLAYERPIPECMD = os.open(PIPEIN, os.O_RDONLY)
+                except:
+                    time.sleep(1)
+                    continue
+                while IS_WORK == 1:
+                    cmd = ''
+                    err = 0
+                    while 1:
+                        try: tmp = os.read(FD_MPLAYERPIPECMD,1)
+                        except:
+                            err = 1
+                            break
+                        if tmp == '\n': break
+                        cmd = cmd + tmp
+                    if err == 1:
+                        os.close(FD_MPLAYERPIPECMD)
+                        break
+                    save_log('FIFOIN: '+cmd)
+                    if cmd != '':
+
+                        cmd = cmd.strip()
+                        lcmd = parse_cmd(cmd)
+                        cmd = command_handler(lcmd[0],lcmd[1])
+                        if cmd != '':
+                            if mpl.command(cmd) == 0: continue
+                            else: cmd = ''                            
+            
+            os.close(FD_MPLAYERPIPECMD)
+
+    ThrdFifoReader().start()
+
+
+
+def check_mplayer(mpl):
+    class ThrdMplChecker(threading.Thread):
+
+        def run(self):
+            global FLAG_GET_PERCENT
+            global PLAYNOW
+            global CURRENT_POS_PL
+
+            while IS_WORK == 1:
+                if (PLAYNOW == 1)and(RADIO_MODE == 0):
+                    FLAG_GET_PERCENT = 1
+                    mpl.command('get_percent_pos')
+                    i = 0
+                    while 1:
+                        time.sleep(0.1)
+                        i += 1
+                        if i == 10:
+                            FLAG_GET_PERCENT = 0
+                            break
+                        if FLAG_GET_PERCENT == 2: break
+                    if RADIO_MODE==1: continue
+                    if (FLAG_GET_PERCENT == 0) and (PLAYNOW == 1):
+                        if REPEAT == 2: 
+                            CURRENT_POS_PL += -1
+                            playnext()
+                        elif CURRENT_POS_PL == len(PLAYLIST)-1:
+                            if REPEAT == 1: playnext()
+                        else: playnext()
+                else:
+                    FLAG_GET_PERCENT = 0
+                    time.sleep(0.5)
+
+    ThrdMplChecker().start()
+
+
+'''
+ANS_META_ARTIST='Powerman 5000                 '
+ANS_META_TITLE='BombShell                     '
+ANS_META_ALBUM='                              '
+ANS_META_GENRE='Unknown'
+ANS_META_YEAR='    '
+ANS_FILENAME='BombShell.mp3'
+'''
+
+def readlines_t(mpl):
+    
+    class ThrdStdIn(threading.Thread):
+
+        def run(self):
+            global FLAG_GET_PERCENT
+            global RADIO_MODE
+            
+            pr_buf = ''
+            while IS_WORK == 1:
+                out = mpl.readlines(1)
+                pipeout = []
+                if out == ['death']:
+                    break
+                elif out != []:
+                    for i in out:
+                        fil = 0
+                        if i.find('ANS_META_ARTIST') != -1:
+                            RADIO_MODE = 0
+                        if i.find('ICY Info:') != -1:
+                            FLAG_GET_PERCENT = 2
+                            RADIO_MODE = 1
+                            if FILTER != 1: save_log(i.replace('\n',''))
+                            else: fil = 1
+                            pipeout.append(i)
+                        if i.find('ANS_PERCENT_POSITION') == -1:
+                            if FILTER != 1: save_log(i.replace('\n',''))
+                            else: fil = 1
+                            pipeout.append(i)
+                        else:
+                            if FLAG_GET_PERCENT == 1: FLAG_GET_PERCENT = 2
+                            elif FLAG_GET_PERCENT == 0:
+                                if FILTER != 1: save_log(i.replace('\n',''))
+                                else: fil = 1
+                                pipeout.append(i)
+                        if fil == 1:
+                            fil = 0
+                            if i.find('ICY Info:') != -1:
+                                pr_buf = i
+                                save_log(pr_buf)
+                            if i.find('ANS_META_ARTIST') != -1:
+                                tmp = i.replace("ANS_META_ARTIST='",'')
+                                tmp = tmp[:-2]
+                                pr_buf = 'Playing: '+tmp.strip()+' - '
+                            if i.find('ANS_META_TITLE') != -1:
+                                tmp = i.replace("ANS_META_TITLE='",'')
+                                tmp = tmp[:-2]
+                                pr_buf = pr_buf+tmp.strip()+' '
+                            if i.find('ANS_META_GENRE') != -1:
+                                tmp = i.replace("ANS_META_GENRE='",'')
+                                tmp = tmp[:-2]
+                                pr_buf = pr_buf+'['+tmp.strip()+']'
+                            if i.find('ANS_FILENAME') != -1:
+                                tmp = i.replace("ANS_FILENAME='",'')
+                                tmp = tmp[:-2]
+                                pr_buf = pr_buf+'\nFilename: '+tmp.strip()
+                                pr_buf = pr_buf+'\n# %d / %d' % (CURRENT_POS_PL+1,len(PLAYLIST))
+                                save_log(pr_buf)
+
+                    pipe_writer(pipeout)
+
+    ThrdStdIn().start()
+
+def playprev():
+    global CURRENT_POS_PL
+    CURRENT_POS_PL += -1
+    if CURRENT_POS_PL < 0: CURRENT_POS_PL = len(PLAYLIST) - 1
+    playsong_pl()
+
+def playnext():
+    global CURRENT_POS_PL
+    global PLAYNOW
+    CURRENT_POS_PL += 1
+    if (CURRENT_POS_PL >= len(PLAYLIST)-1)and(REPEAT == 1): CURRENT_POS_PL = 0
+    elif CURRENT_POS_PL >= len(PLAYLIST)-1:
+        PLAYNOW = 0
+        return
+    playsong_pl()
+
+def get_info_playfile():
+    global MPLAYER
+
+    MPLAYER.command('get_meta_artist')
+    MPLAYER.command('get_meta_title')
+    MPLAYER.command('get_meta_album')
+    MPLAYER.command('get_meta_genre')
+    MPLAYER.command('get_meta_year')
+    MPLAYER.command('get_file_name')
+
+def playsong_pl():
+    global MPLAYER
+    global CURRENT_POS_PL
+    global PLAYNOW
+    global RADIO_MODE
+
+    RADIO_MODE = 0
+
+    if CURRENT_POS_PL < 0: CURRENT_POS_PL = 0
+    if CURRENT_POS_PL >= len(PLAYLIST): CURRENT_POS_PL = len(PLAYLIST)-1    
+
+    SONG = PLAYLIST[CURRENT_POS_PL]
+    if SONG.find('http://') != -1: RADIO_MODE = 1
+    PLAYNOW = 1
+    MPLAYER.command('loadfile "'+SONG+'"')
+    get_info_playfile()
+
+class MPlayer(object):
+    
+
+    def __init__(self):
+        self._mplayer = subprocess.Popen(
+                CURRENTMPLAYERCMD,
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+        self.i_am_live = 1        
+
+    def readlines(self, count):
+        
+        ret = []
+        for i in xrange(count):
+            if self.checklive() == 0:
+                ret = ['death']
+                self.i_am_live = 0                
+                break
+            txt = self._mplayer.stdout.readline()
+            ret.append(txt)
+            
+        return ret
+
+    def command(self, name):
+        """ Very basic interface [see populate()]
+        Sends command 'name' to process, with given args
+        """
+        cmd = name+'\n'
+        if self.i_am_live == 1:
+            self._mplayer.stdin.write(cmd)
+        return self.i_am_live
+    
+    def checklive(self):
+        return self._mplayer.poll()
+
+    def killmplayer(self):
+        try: self._mplayer.kill()
+        finally: pass
+
+def clear_playlist():
+    global PLAYLIST
+    global CURRENT_POS_PL
+    CURRENT_POS_PL = 0
+    PLAYLIST = []
+
+def del_playlist(beg=0,end=-1):
+    global PLAYLIST
+    global CURRENT_POS_PL
+
+    if len(PLAYLIST) > 0:
+        save_log("Deleting:")
+        save_log("-----------------------------------------------")
+        if end <= 0: end = len(PLAYLIST)
+        elif end > len(PLAYLIST): end = len(PLAYLIST)
+        if beg < 0: beg = 1
+        elif beg > end: beg = end
+        i = 0
+        deleted = 0
+        old_pl = PLAYLIST
+        PLAYLIST = []
+        for song in old_pl:
+            i += 1
+            if i<beg:
+                PLAYLIST.append(song)
+                continue
+            if i>end:
+                PLAYLIST.append(song)
+                continue
+            if CURRENT_POS_PL > end-1: CURRENT_POS_PL += -1
+            else: CURRENT_POS_PL = 0
+            deleted += 1
+            numb = str(i)
+            pos = 10-len(numb)
+            if pos < 0 : pos = 0
+            separ = ''
+            for j in xrange(pos): separ = separ+' '
+            numb = separ+numb
+            
+            try: song_bn = os.path.basename(song)
+            except: song_bn = song
+            song = song_bn
+
+            save_log(numb+' x '+song)
+
+        save_log("-------------------------------------------------")
+        save_log("Deleted: %d / %d | Now: %d" % (deleted, len(old_pl), len(PLAYLIST)))
+
+
+def getplaylist(path):
+    global PLAYLIST
+    path = path.replace('"','')
+    path = path.replace("'",'')
+    DIR_PLAY = os.path.dirname(path)+'/'
+    try: fplaylist = open(path,'r')
+    except: return 0
+    
+    while 1:
+        song = fplaylist.readline()
+        if song == '' : break
+        song = song.replace('\n', '')
+        if song.find('http://') == -1: song = DIR_PLAY+song
+        PLAYLIST.append(song)
+        #save_log('Add to playlist: '+song)
+ 
+    fplaylist.close()
+    return 1
+
+def addfile_to_pl(path):
+    global PLAYLIST
+    path = path.replace('"','')
+    path = path.replace("'",'')
+    PLAYLIST.append(path)
+    return 1
+
+def view_play_history():
+    for hist_item in PLAY_HISTORY:
+        save_log(hist_item)
+
+def add_play_history(value):
+    global PLAY_HISTORY    
+    global PLAY_HISTORY_POSITION
+    if value != '': 
+        PLAY_HISTORY.append(value)
+        PLAY_HISTORY_POSITION = len(PLAY_HISTORY)-1
+
+
+def get_prev_history(increm):
+    global PLAY_HISTORY_POSITION
+    c_increm = 1
+    if increm != '':    
+        try: c_increm = int(increm)
+        finally: pass
+    PLAY_HISTORY_POSITION = PLAY_HISTORY_POSITION-c_increm    
+    if PLAY_HISTORY_POSITION == -1: PLAY_HISTORY_POSITION = len(PLAY_HISTORY)-1
+    return PLAY_HISTORY[PLAY_HISTORY_POSITION]
+
+def get_next_history(increm):
+    global PLAY_HISTORY_POSITION
+    c_increm = 1
+    if increm != '':    
+        try: c_increm = int(increm)
+        finally: pass
+    PLAY_HISTORY_POSITION = PLAY_HISTORY_POSITION+c_increm    
+    if PLAY_HISTORY_POSITION == len(PLAY_HISTORY): PLAY_HISTORY_POSITION = 0
+    return PLAY_HISTORY[PLAY_HISTORY_POSITION]
+    
+def viewplaylist(beg=0,end=-1,col=0):
+    if col == 1: 
+        save_log("Items count: %d" % (len(PLAYLIST)))
+        return
+    if len(PLAYLIST) > 0:
+        save_log("Playlist:")
+        save_log("-------------------------------------------------")
+        if end <= 0: end = len(PLAYLIST)
+        elif end > len(PLAYLIST): end = len(PLAYLIST)
+        if beg < 0: beg = 1
+        elif beg > end: beg = end
+        i = 0
+        c = 0
+        MAX_OUT = 100
+        DELAY_SEC = 0.4
+        for song in PLAYLIST:
+            i += 1
+            c += 1
+            if i<beg: continue
+            if i>end: break
+            numb = str(i)
+            pos = 10-len(numb)
+            if pos < 0 : pos = 0
+            separ = ''
+            for j in xrange(pos): separ = separ+' '
+            numb = separ+numb
+            try: song_bn = os.path.basename(song)
+            except: song_bn = song
+            song = song_bn
+            if i-1 == CURRENT_POS_PL:
+                save_log(numb+' X '+song)
+            else: save_log(numb+' | '+song)
+            if c == MAX_OUT:
+                save_log("              ***")
+                time.sleep(DELAY_SEC)
+                c = 0
+
+        save_log("-------------------------------------------------")
+        save_log("All counts: %d" % (len(PLAYLIST)))
+
+def save_log(text):
+    print text
+    if SAVELOG != '':
+        try: slog = open(SAVELOG,'a')
+        except: slog = None
+        if slog is not None:
+            slog.write(text+'\n')
+            slog.close()
+        else:
+            try: slog = open(SAVELOG,'w')
+            except: return 0
+            slog.write(text+'\n')
+            slog.close()
+
+
+def getCURRENTMPLAYERCMD(argvs):
+    global CURRENTMPLAYERCMD
+    global PIPEOUT
+    global PIPEIN
+    global SAVELOG
+    global PID_ENABLED
+    exe_name = PATHTOMPLAYER
+
+    CURRENTMPLAYERCMD = []
+
+    CURRENTMPLAYERCMD.append(exe_name)
+    CURRENTMPLAYERCMD.append('-slave')
+    CURRENTMPLAYERCMD.append('-quiet')
+    CURRENTMPLAYERCMD.append('-idle')
+
+    # pymplayer [pymplayer argvs] -- [mplayer argvs]
+
+    if len(argvs) > 1:
+        argvs = argvs[1:]
+        mplparams = 0
+        getpipeout = 0
+        getpipein = 0
+        getsavelog = 0
+        for ar in argvs:
+            if mplparams == 0:
+                if ar == '--': mplparams = 1
+                else: # pymplayer argvs
+                    if (ar == '-in')and(PIPEIN == ''): getpipein = 1
+                    elif getpipein == 1:
+                        PIPEIN = ar
+                        getpipein = 0
+                    elif (ar == '-log')and(SAVELOG == ''): getsavelog = 1
+                    elif getsavelog == 1:
+                        SAVELOG = ar
+                        getsavelog = 0
+                    elif (ar == '-out')and(PIPEOUT == ''): getpipeout = 1
+                    elif getpipeout == 1: 
+                        PIPEOUT = ar
+                        getpipeout = 0
+                    elif ar == '-pidon': PID_ENABLED = 1
+                    else: save_log("Unknown param: "+ar)
+            else: CURRENTMPLAYERCMD.append(ar) # mplayer argvs
+    else: save_log("Usage: pymplayer [-out fifoout] [-in fifoin] [-log logfile] [-pidon] [-- mplayer_argvs]")
+
+
+def me_init():
+    global PIPEFD
+    global POLL
+    global IS_WORK
+
+    getCURRENTMPLAYERCMD(sys.argv)
+
+    if PID_ENABLED == 1:
+        MY_PID = os.getpid()
+        save_log('WRITE PID: '+str(MY_PID))
+        fpidfile = open(PID_PYMPLAYER, 'w')
+        fpidfile.write(str(MY_PID))
+        fpidfile.close()
+
+
+    if PIPEOUT != '':
+        PIPEFD = os.open(PIPEOUT, os.O_WRONLY)
+        POLL = select.poll()
+        POLL.register(PIPEFD, select.POLLOUT)
+
+    IS_WORK = 1
+    me_start()
+    return 1
+
+
+def parse_cmd(cmd):
+    cmd = cmd.strip()
+
+    if cmd == '': return ['','']
+
+    lcmd = cmd.split()
+    name = lcmd[0]
+    params_cmd=''
+    if len(lcmd) > 1:
+        params_cmd = ' '.join(lcmd[1:])
+        params_cmd = params_cmd.strip()
+
+    return [name, params_cmd]
+
+
+def command_handler(name,params_cmd):
+    global MPLAYER
+    global CURRENT_POS_PL
+    global REPEAT
+    global PLAYNOW
+    global FILTER
+    global MEMCMD
+    
+    
+    if params_cmd != '': cmd = name + ' ' + params_cmd
+    else: cmd = name
+
+    if name == 'cmdlist':
+        save_log(CMDLIST)
+            
+    elif name == 'quit':
+        PLAYNOW = 0
+        MPLAYER.command('quit')
+        cmd = ''
+
+    elif name == 'exit':
+        PLAYNOW = 0
+        MPLAYER.command('quit')
+        save_log('Exiting...')
+        cmd = ''
+
+    elif (name == 'mpl') or (name == 'mplayer'):
+        argvs = ['', '--']
+        if params_cmd == '': argvs = argvs+lcmd[1:]
+        getCURRENTMPLAYERCMD(argvs)
+        cmd = ''
+
+    elif name == 'info':
+        get_info_playfile()
+        cmd = ''
+        
+
+    elif name == 'j':
+        if params_cmd != '':
+            try: step = int(params_cmd)
+            except: step = 1
+            CURRENT_POS_PL += step
+            playsong_pl()
+        else: playnext()
+        cmd = ''
+
+    elif name == 'J':
+        if params_cmd != '':
+            try: val = int(params_cmd)*10
+            except: val = 10
+            CURRENT_POS_PL += val
+        else: 
+            CURRENT_POS_PL += 10
+        playsong_pl()
+        cmd = ''
+
+    elif name == 'K':
+        if params_cmd != '':
+            try: val = int(params_cmd)*(-10)
+            except: val = -10
+            CURRENT_POS_PL += val
+        else: CURRENT_POS_PL += -10
+        playsong_pl()
+        cmd = ''
+
+    elif name == 'k':
+        if params_cmd != '':
+            try: step = int(params_cmd)*(-1)
+            except: step = -1
+            CURRENT_POS_PL += step
+            playsong_pl()
+        else: playprev()
+        cmd = ''
+
+    elif name == 'g':
+        if params_cmd != '':
+            try: val = int(params_cmd)
+            except: return ''
+            CURRENT_POS_PL = val-1
+            playsong_pl()
+        cmd = ''
+
+    elif name == 'rep':
+        if params_cmd != '':
+            try: val = int(params_cmd)
+            except: val = 1
+            REPEAT = val
+        else: REPEAT = 1
+        if REPEAT > 2: REPEAT = 1
+        if REPEAT == 0: save_log('Repeat: off')
+        elif REPEAT == 1: save_log('Repeat: all')
+        elif REPEAT == 2: save_log('Repeat: current')
+        cmd = ''
+    
+    elif name == 'loadfile':
+        cmd = 'loadfile '+params_cmd
+        MEMCMD = cmd
+        add_play_history(cmd)
+        clear_playlist()
+        addfile_to_pl(params_cmd)
+        CURRENT_POS_PL = 0
+        playsong_pl()
+        cmd = ''
+
+
+    elif name == 'o':
+        append = 0
+        if params_cmd[0:2] == '-a':
+            append = 1
+            params_cmd = params_cmd[2:]
+            params_cmd = params_cmd.strip()
+        else:
+            clear_playlist()
+            CURRENT_POS_PL = 0
+        cmd = 'loadfile '+params_cmd
+        MEMCMD = cmd
+        add_play_history(cmd)
+        addfile_to_pl(params_cmd)
+        if append == 0: playsong_pl() 
+        cmd = ''
+
+    elif name == 'loadlist':
+        append = 0
+        if params_cmd[0:2] == '-a':
+            append = 1
+            params_cmd = params_cmd[2:]
+            params_cmd = params_cmd.strip()
+        else:
+            clear_playlist()
+            CURRENT_POS_PL = 0
+        MEMCMD = name +' '+ params_cmd
+        cmd = MEMCMD
+        add_play_history(cmd)
+        if getplaylist(params_cmd)==0: 
+            save_log('error')
+            cmd = ''
+        if append == 0: playsong_pl() 
+        cmd = ''
+
+
+    elif name == 'p':
+        append = 0
+        if params_cmd[0:2] == '-a':
+            append = 1
+            params_cmd = params_cmd[2:]
+            params_cmd = params_cmd.strip()
+        else:
+            clear_playlist()
+            CURRENT_POS_PL = 0
+        MEMCMD = name +' '+ params_cmd
+        cmd = MEMCMD
+        add_play_history(cmd)
+        if getplaylist(params_cmd)==0: 
+            save_log('error')
+            cmd = ''
+        if append == 0: playsong_pl() 
+        cmd = ''
+        
+    elif name == 'pl':
+        if len(params_cmd) == 0:
+            begp = (CURRENT_POS_PL+1) - 5
+            if begp < 1: begp = 1
+            endp = CURRENT_POS_PL+6
+            if endp > len(PLAYLIST): endp = len(PLAYLIST)
+            viewplaylist(beg=begp,end=endp)
+        elif params_cmd.find('all') != -1: viewplaylist()
+        elif params_cmd.find('count') != -1: viewplaylist(col=1)
+        else:
+            params_split = params_cmd.split(':')
+            if len(params_split) == 0: save_log('Error')
+            elif len(params_split) == 1:
+                try: endp = int(params_split[0])
+                except: endp = -1
+                viewplaylist(end=endp)
+            elif len(params_split) >= 2:
+                try: begp = int(params_split[0])
+                except: begp = 0
+                try: endp = int(params_split[1])
+                except: endp = -1
+                viewplaylist(beg=begp,end=endp)
+        cmd = ''
+
+    elif name == 'rm':
+        if len(params_cmd) == 0: del_playlist()
+        else:
+            params_split = params_cmd.split(':')
+            if len(params_split) == 0: save_log('Error')
+            elif len(params_split) == 1:
+                try: endp = int(params_split[0])
+                except: endp = -1
+                del_playlist(end=endp)
+            elif len(params_split) >= 2:
+                try: begp = int(params_split[0])
+                except: begp = 0
+                try: endp = int(params_split[1])
+                except: endp = -1
+                del_playlist(beg=begp,end=endp)
+        cmd = ''
+
+    elif name == 'vh':
+        view_play_history()
+        cmd = ''
+
+    elif name == 'rp':
+        cmd = MEMCMD
+        lcmd = parse_cmd(cmd)
+        cmd = command_handler(lcmd[0],lcmd[1])
+
+    elif name == 'prev':
+        cmd = get_prev_history(params_cmd)
+        MEMCMD = cmd
+        lcmd = parse_cmd(cmd)
+        cmd = command_handler(lcmd[0],lcmd[1])
+
+    elif name == 'next':
+        cmd = get_next_history(params_cmd)
+        MEMCMD = cmd
+        lcmd = parse_cmd(cmd)
+        cmd = command_handler(lcmd[0],lcmd[1])
+
+    elif name == 'filter':
+        if FILTER == 1:
+            FILTER = 0
+            save_log("Filter: OFF")
+        else:
+            FILTER = 1
+            save_log("Filter: ON")
+        cmd = ''
+
+
+    elif name == 'v':
+        if params_cmd != '': cmd = 'volume '+params_cmd+' 1 1'
+        else: cmd = 'volume 100 1 1'
+
+    elif name == 'l':
+        if params_cmd != '': cmd = 'seek +'+params_cmd+' 0'
+        else: cmd = 'seek +5 0'
+   
+    elif name == 'L':
+        if params_cmd != '':
+            try: val = str(int(params_cmd)*10)
+            except: val = '10'
+            cmd = 'seek +'+val+' 0'
+        else: cmd = 'seek +10 0'
+    
+    elif name == 'h':
+        if params_cmd != '': cmd = 'seek -'+params_cmd+' 0'
+        else: cmd = 'seek -5 0'
+
+    elif name == 'H':
+        if params_cmd != '':
+            try: val = str(int(params_cmd)*10)
+            except: val = '10'
+            cmd = 'seek -'+val+' 0'
+        else: cmd = 'seek -10 0'                
+
+    elif name == '#':
+        if params_cmd != '': cmd = 'seek '+params_cmd+' 1'
+        else: cmd = 'seek 0 1'
+    
+    elif name == '@':
+        if params_cmd != '': cmd = 'seek '+params_cmd+' 2'
+        else: cmd = 'seek 1 2'
+
+    elif name == 'pause':
+        PLAYNOW = 0
+        cmd = ''
+
+    elif name == 'stop':
+        PLAYNOW = 0
+        cmd = ''
+
+    return cmd
+
+
+def me_start(): 
+    global PIPEOUT
+    global MPLAYER
+    
+    cmd = ''
+    name = ''
+    MEMCMD = ''
+    
+    save_log('Hello, PyMPLayer is ready to work. Input cmdlist for read commands list.')
+    while IS_WORK == 1:
+        save_log('Run mplayer slave-session:')
+        MPLAYER = MPlayer()
+        import readline
+        readline.parse_and_bind('tab: complete')
+        import rlcompleter
+        readlines_t(MPLAYER)
+        check_mplayer(MPLAYER)
+        read_cmd_from_fifo(MPLAYER)
+        if cmd != '':
+
+            cmd = cmd.strip()
+            lcmd = parse_cmd(cmd)
+            cmd = command_handler(lcmd[0],lcmd[1])
+            if cmd != '':
+                if MPLAYER.command(cmd) == 0: continue
+                else: cmd = ''            
+        
+        while IS_WORK == 1:
+            try: cmd = raw_input('% ')
+            except:
+                cmd = ''
+                time.sleep(1)
+                
+            cmd = cmd.strip()
+            lcmd = parse_cmd(cmd)
+            name = lcmd[0]
+            cmd = command_handler(lcmd[0],lcmd[1])
+
+            if name == 'exit': break
+
+            if cmd == '': continue
+            
+            if MPLAYER.command(cmd)==0:
+                break     
+
+        time.sleep(1)
+        if name == 'exit':
+            close_work()
+            break
+
+def close_work():
+    global PIPEFD
+    
+    if PIPEOUT != '' : os.close(PIPEFD)
+
+    save_log('Bye, bye...')
+    sys.exit()
+
+
+def me_stop(signum, frame):
+    global MPLAYER
+    global IS_WORK
+   
+    if signal > 0: save_log('SIGNAL ['+str(signum)+'] Stopping...')
+
+    IS_WORK = 0
+    MPLAYER.killmplayer()
+    close_work()
+
+
+if __name__ == '__main__':
+    
+    signal.signal(signal.SIGINT, me_stop)
+    signal.signal(signal.SIGTERM, me_stop)
+    me_init()
+
