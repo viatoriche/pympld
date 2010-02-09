@@ -98,7 +98,7 @@ def pipe_writer(out_text):
 def read_cmd_from_fifo(mpl):
     if PIPEIN == '': return
     class ThrdFifoReader(threading.Thread):
-
+        
         def run(self):
             while IS_WORK == 1:
                 try: FD_MPLAYERPIPECMD = os.open(PIPEIN, os.O_RDONLY)
@@ -108,12 +108,17 @@ def read_cmd_from_fifo(mpl):
                 while IS_WORK == 1:
                     cmd = ''
                     err = 0
+                    time.sleep(1)
                     while 1:
+                        if cmd == '': time.sleep(1)
                         try: tmp = os.read(FD_MPLAYERPIPECMD,1)
                         except:
                             err = 1
+                            time.sleep(1)
                             break
-                        if tmp == '\n': break
+                        if tmp == '\n': 
+                            time.sleep(1)
+                            break
                         cmd = cmd + tmp
                     if err == 1:
                         os.close(FD_MPLAYERPIPECMD)
@@ -148,7 +153,7 @@ def check_mplayer(mpl):
                     mpl.command('get_percent_pos')
                     i = 0
                     while 1:
-                        time.sleep(0.1)
+                        time.sleep(0.2)
                         i += 1
                         if i == 10:
                             FLAG_GET_PERCENT = 0
@@ -905,6 +910,8 @@ def me_start():
             except:
                 cmd = ''
                 time.sleep(1)
+
+            if cmd == '': continue
                 
             cmd = cmd.strip()
             lcmd = parse_cmd(cmd)
