@@ -8,3 +8,7 @@ MPLAYERPIPECMD=CONFIG_DIR+'pipecmdmpl'
 PID_PYMPLAYER=CONFIG_DIR+'pymplayer.pid'
 MPLAYERSTDOUT=CONFIG_DIR+'mplout'
 PYMPLAYERLOG=CONFIG_DIR+'pymplayer.log'
+
+USE_MP3INFO = 1
+# Depedence: mp3info
+# 1 - On / 2 - Off

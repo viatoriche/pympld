@@ -65,6 +65,7 @@ PLAY_HISTORY_POSITION=0
 CURRENT_POS_PL = 0
 REPEAT = 1 # 0 - off, 1 - all, 2 - current
 PLAYLIST = []
+MP3INFO_PLAYLIST = []
 PLAYNOW = 0
 RADIO_MODE = 0
 MEMCMD = ''
@@ -427,7 +428,34 @@ def get_next_history(increm):
     PLAY_HISTORY_POSITION = PLAY_HISTORY_POSITION+c_increm    
     if PLAY_HISTORY_POSITION == len(PLAY_HISTORY): PLAY_HISTORY_POSITION = 0
     return PLAY_HISTORY[PLAY_HISTORY_POSITION]
+
+# mp3info -p '%a - %t'
+
+def get_mp3_info(num):
+    if USE_MP3INFO != 1: return ''
+    global MP3INFO_PLAYLIST
     
+    if len(MP3INFO_PLAYLIST) != len(PLAYLIST):
+        MP3INFO_PLAYLIST = []
+        for i in range(len(PLAYLIST)):
+            MP3INFO_PLAYLIST.append('')
+
+    try: inf = MP3INFO_PLAYLIST[num]
+    except: inf = ''
+
+    if inf == '':
+        mp3 = subprocess.Popen(
+                ['mp3info','-p','%a - %t',PLAYLIST[num]],
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+        
+        try: inf = mp3.stdout.readline()
+        except: inf = ''
+        
+    if inf == ' - ': inf = ''
+    if inf != '': MP3INFO_PLAYLIST[num] = inf
+    return inf
+
+
 def viewplaylist(beg=0,end=-1,col=0):
     if col == 1: 
         save_log("Items count: %d" % (len(PLAYLIST)))
@@ -442,13 +470,14 @@ def viewplaylist(beg=0,end=-1,col=0):
         i = 0
         c = 0
         MAX_OUT = 100
-        DELAY_SEC = 0.4
+        #DELAY_SEC = 0.4
         for song in PLAYLIST:
             i += 1
             c += 1
             if i<beg: continue
             if i>end: break
             numb = str(i)
+            mp3 = get_mp3_info(i-1)
             pos = 10-len(numb)
             if pos < 0 : pos = 0
             separ = ''
@@ -457,12 +486,13 @@ def viewplaylist(beg=0,end=-1,col=0):
             try: song_bn = os.path.basename(song)
             except: song_bn = song
             song = song_bn
+            if mp3 != '': song = mp3
             if i-1 == CURRENT_POS_PL:
                 save_log(numb+' X '+song)
             else: save_log(numb+' | '+song)
             if c == MAX_OUT:
                 save_log("              ***")
-                time.sleep(DELAY_SEC)
+                # time.sleep(DELAY_SEC)
                 c = 0
 
         save_log("-------------------------------------------------")
@@ -834,11 +864,11 @@ def command_handler(name,params_cmd):
 
     elif name == 'pause':
         PLAYNOW = 0
-        cmd = ''
+        cmd = 'pause'
 
     elif name == 'stop':
         PLAYNOW = 0
-        cmd = ''
+        cmd = 'stop'
 
     return cmd
 
