@@ -23,7 +23,6 @@ if len(sys.argv)>1:
     cmd = cmd+'\n'
 else: sys.exit()
 
-f=open(CMDMPL,'w')
+f=open(MPLAYERPIPECMD,'w')
 f.write(cmd)
 f.close()
-

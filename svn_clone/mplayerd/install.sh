@@ -8,14 +8,12 @@ installdir=$HOME/bin
 cd $installdir
 
 rm pymplayer
-rm ctrlmpld
 rm startmpld
 rm stopmpld
 rm mpc
 rm mpld
 
 ln -s $curdir/pymplayer
-ln -s $curdir/ctrlmpld
 ln -s $curdir/startmpld
 ln -s $curdir/stopmpld
 ln -s $curdir/mpc

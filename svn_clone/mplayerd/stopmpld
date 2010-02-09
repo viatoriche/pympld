@@ -11,12 +11,11 @@
 
 import os
 import time
+import sys
 from config import *
 
-print 'Stoping mplayerd'
-
 print 'Stop pymplayer'
-try:    
+try:
     pidfile=open(PID_PYMPLAYER,'r')
     PID=pidfile.readline()
     PID=PID.replace('\n','')
@@ -24,26 +23,11 @@ try:
     pidfile.close()
 except:PID=0
 
-try: 
-    if PID<>0: os.kill(PID,2)
-except: pass
+try: SIGKILL = int(sys.argv[1])
+except: SIGKILL = 2
 
-time.sleep(1)
-
-print 'Stop ctrlmpld'
 try:
-    pidfile=open(PID_CTRLMPLD,'r')
-    PID=pidfile.readline()
-    PID=PID.replace('\n','')
-    PID=int(PID)
-    pidfile.close()
-except:PID=0
-
-try: 
-    if PID<>0: os.kill(PID,2)
+    if PID<>0: os.kill(PID,SIGKILL)
 except: pass
 
 time.sleep(1)
-
-#If you use windows, change it:
-
