@@ -16,7 +16,9 @@ import sys
 import string
 import select
 from config import *
-
+import readline
+import rlcompleter
+ 
 # Variables
 
 CMDLIST = """
@@ -56,8 +58,8 @@ PIPEIN = ''
 SAVELOG = ''
 PIPEFD = ''
 POLL = None
-IAM_LIVE = 0
-IS_WORK = 0
+IAM_LIVE = 1
+IS_WORK = 1
 MPLAYER = 0
 CURRENTMPLAYERCMD = []
 PLAY_HISTORY=[]
@@ -107,19 +109,17 @@ def read_cmd_from_fifo(mpl):
                     continue
                 while IS_WORK == 1:
                     cmd = ''
-                    err = 0
-                    time.sleep(1)
-                    while 1:
-                        if cmd == '': time.sleep(1)
+                    err = 0                    
+                    while IS_WORK == 1:
+                        if cmd == '': time.sleep(0.2)
                         try: tmp = os.read(FD_MPLAYERPIPECMD,1)
                         except:
                             err = 1
-                            time.sleep(1)
                             break
                         if tmp == '\n': 
-                            time.sleep(1)
                             break
                         cmd = cmd + tmp
+                    if IS_WORK == 0: return
                     if err == 1:
                         os.close(FD_MPLAYERPIPECMD)
                         break
@@ -129,14 +129,42 @@ def read_cmd_from_fifo(mpl):
                         cmd = cmd.strip()
                         lcmd = parse_cmd(cmd)
                         cmd = command_handler(lcmd[0],lcmd[1])
+
+                        if cmd == 'exit': return
+
                         if cmd != '':
-                            if mpl.command(cmd) == 0: continue
+                            if mpl.command(cmd) == 0: return
                             else: cmd = ''                            
             
             os.close(FD_MPLAYERPIPECMD)
 
     ThrdFifoReader().start()
 
+def read_cmd_from_raw_input(mpl):
+    class ThrdRawReader(threading.Thread):
+        
+        def run(self):
+            while IS_WORK == 1:
+                try: cmd = raw_input('% ')
+                except:
+                    cmd = ''
+                    time.sleep(0.3)
+
+                if cmd == '': continue
+                    
+                cmd = cmd.strip()
+                lcmd = parse_cmd(cmd)
+                name = lcmd[0]
+                cmd = command_handler(lcmd[0],lcmd[1])
+                
+                if cmd == '': continue
+
+                if cmd == 'exit': return
+                
+                if mpl.command(cmd)==0:
+                    return
+            
+    ThrdRawReader().start()
 
 
 def check_mplayer(mpl):
@@ -147,10 +175,11 @@ def check_mplayer(mpl):
             global PLAYNOW
             global CURRENT_POS_PL
 
+
             while IS_WORK == 1:
                 if (PLAYNOW == 1)and(RADIO_MODE == 0):
                     FLAG_GET_PERCENT = 1
-                    mpl.command('get_percent_pos')
+                    if mpl.command('get_percent_pos')==0: break
                     i = 0
                     while 1:
                         time.sleep(0.2)
@@ -190,14 +219,20 @@ def readlines_t(mpl):
         def run(self):
             global FLAG_GET_PERCENT
             global RADIO_MODE
+            global IAM_LIVE
             
+            IAM_LIVE = 1
+
             pr_buf = ''
             while IS_WORK == 1:
                 out = mpl.readlines(1)
+                IAM_LIVE = 1
                 pipeout = []
                 if out == ['death']:
-                    break
+                    IAM_LIVE = 0
+                    return
                 elif out != []:
+                    IAM_LIVE = 1
                     for i in out:
                         fil = 0
                         if i.find('ANS_META_ARTIST') != -1:
@@ -290,13 +325,14 @@ def playsong_pl():
     get_info_playfile()
 
 class MPlayer(object):
-    
+    global IAM_LIVE
 
     def __init__(self):
         self._mplayer = subprocess.Popen(
                 CURRENTMPLAYERCMD,
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-        self.i_am_live = 1        
+        self.i_am_live = 1      
+        IAM_LIVE = 1
 
     def readlines(self, count):
         
@@ -305,6 +341,7 @@ class MPlayer(object):
             if self.checklive() == 0:
                 ret = ['death']
                 self.i_am_live = 0                
+                IAM_LIVE = 0
                 break
             txt = self._mplayer.stdout.readline()
             ret.append(txt)
@@ -318,6 +355,7 @@ class MPlayer(object):
         cmd = name+'\n'
         if self.i_am_live == 1:
             self._mplayer.stdin.write(cmd)
+        else: IAM_LIVE = 0
         return self.i_am_live
     
     def checklive(self):
@@ -610,7 +648,7 @@ def command_handler(name,params_cmd):
     global PLAYNOW
     global FILTER
     global MEMCMD
-    
+    global IS_WORK 
     
     if params_cmd != '': cmd = name + ' ' + params_cmd
     else: cmd = name
@@ -625,9 +663,12 @@ def command_handler(name,params_cmd):
 
     elif name == 'exit':
         PLAYNOW = 0
-        MPLAYER.command('quit')
+        MPLAYER.killmplayer()
+        IS_WORK = 0
         save_log('Exiting...')
         cmd = ''
+        close_work()
+        return 'exit'
 
     elif (name == 'mpl') or (name == 'mplayer'):
         argvs = ['', '--']
@@ -877,63 +918,39 @@ def command_handler(name,params_cmd):
 
     return cmd
 
+def reinit():
+    global MPLAYER
+
+    if IS_WORK == 0: return
+
+    save_log('Run mplayer slave-session:')
+    MPLAYER = MPlayer()
+    readlines_t(MPLAYER)
+    check_mplayer(MPLAYER)
+    read_cmd_from_fifo(MPLAYER)
+    read_cmd_from_raw_input(MPLAYER)
 
 def me_start(): 
-    global PIPEOUT
-    global MPLAYER
-    
-    cmd = ''
-    name = ''
-    MEMCMD = ''
-    
+        
+    readline.parse_and_bind('tab: complete')
+
     save_log('Hello, PyMPLayer is ready to work. Input cmdlist for read commands list.')
     while IS_WORK == 1:
-        save_log('Run mplayer slave-session:')
-        MPLAYER = MPlayer()
-        import readline
-        readline.parse_and_bind('tab: complete')
-        import rlcompleter
-        readlines_t(MPLAYER)
-        check_mplayer(MPLAYER)
-        read_cmd_from_fifo(MPLAYER)
-        if cmd != '':
-
-            cmd = cmd.strip()
-            lcmd = parse_cmd(cmd)
-            cmd = command_handler(lcmd[0],lcmd[1])
-            if cmd != '':
-                if MPLAYER.command(cmd) == 0: continue
-                else: cmd = ''            
-        
-        while IS_WORK == 1:
-            try: cmd = raw_input('% ')
-            except:
-                cmd = ''
-                time.sleep(1)
-
-            if cmd == '': continue
+        reinit()
+        while IAM_LIVE == 1:
+            if IS_WORK == 0: return
+            time.sleep(1)
                 
-            cmd = cmd.strip()
-            lcmd = parse_cmd(cmd)
-            name = lcmd[0]
-            cmd = command_handler(lcmd[0],lcmd[1])
-
-            if name == 'exit': break
-
-            if cmd == '': continue
-            
-            if MPLAYER.command(cmd)==0:
-                break     
-
-        time.sleep(1)
-        if name == 'exit':
-            close_work()
-            break
-
+        
 def close_work():
     global PIPEFD
+    global MPLAYER
     
     if PIPEOUT != '' : os.close(PIPEFD)
+
+    IS_WORK = 0
+
+    MPLAYER.killmplayer()
 
     save_log('Bye, bye...')
     sys.exit()
