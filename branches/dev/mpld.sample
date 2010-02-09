@@ -1,7 +1,0 @@
-#!/bin/sh
-CONFIG_DIR='/path/to/mplayerd/'
-MPLAYERSTDOUT=$CONFIG_DIR'mplout'
-
-startmpld
-echo 'Starting pipempl reader'
-pipemplrdr $MPLAYERSTDOUT &

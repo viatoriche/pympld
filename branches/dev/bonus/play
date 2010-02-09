@@ -1,9 +1,0 @@
-#!/bin/sh
-# Play file
-# example: 
-# cd ~/music
-# play filename.mp3
-# ???
-# PROFIT 
-
-mpc o "`pwd`/$1"
