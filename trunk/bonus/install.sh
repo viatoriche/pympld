@@ -22,6 +22,7 @@ rm mplaylist
 rm pipemplrdr
 rm pipescrobbler
 rm play
+rm pyparsempl
 
 ln -s $curdir/gen_mplayer_list
 ln -s $curdir/lmpl
@@ -30,6 +31,7 @@ ln -s $curdir/mplaylist
 ln -s $curdir/pipemplrdr
 ln -s $curdir/pipescrobbler
 ln -s $curdir/play
+ln -s $curdir/pyparsempl
 
 ln -s $curdir/urlencode
 ln -s $curdir/vkfindaudio

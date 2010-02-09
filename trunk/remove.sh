@@ -8,11 +8,9 @@ installdir=$HOME/bin
 cd $installdir
 
 rm $installdir/pymplayer
-rm $installdir/ctrlmpld
 rm $installdir/startmpld
 rm $installdir/stopmpld
 rm $installdir/mpc
-rm $installdir/mpld
 
 #PIPES
 

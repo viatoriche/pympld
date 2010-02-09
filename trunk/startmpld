@@ -6,40 +6,6 @@ import os
 import time
 from config import *
 
-
-print '(Re)Starting mplayerd'
-
-print 'Stop pymplayer'
-try:    
-    pidfile=open(PID_PYMPLAYER,'r')
-    PID=pidfile.readline()
-    PID=PID.replace('\n','')
-    PID=int(PID)
-    pidfile.close()
-except:PID=0
-
-try: 
-    if PID<>0: os.kill(PID,2)
-except: pass
-
-time.sleep(2)
-
-print 'Stop ctrlmpld'
-try:
-    pidfile=open(PID_CTRLMPLD,'r')
-    PID=pidfile.readline()
-    PID=PID.replace('\n','')
-    PID=int(PID)
-    pidfile.close()
-except:PID=0
-
-try: 
-    if PID<>0: os.kill(PID,2)
-except: pass
-
-time.sleep(2)
-
+os.system('stopmpld 15')
 print 'Starting pymplayer'
-os.system('pymplayer -out '+MPLAYERSTDOUT+' < '+MPLAYERPIPECMD+' 2>/tmp/mplerr >'+PYMPLAYERLOG+'&')
-print 'Starting ctrlmpld'
-os.system('ctrlmpld >/dev/null 2>/dev/null&')
+os.system('pymplayer -out '+MPLAYERSTDOUT+' -in '+MPLAYERPIPECMD+' -log '+PYMPLAYERLOG+' -pidon -- -fs 2>/tmp/mplerr > /dev/null&')
