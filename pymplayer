@@ -18,6 +18,7 @@ import select
 from config import *
 import readline
 import rlcompleter
+import re
  
 # Variables
 
@@ -174,12 +175,30 @@ def check_mplayer(mpl):
             global FLAG_GET_PERCENT
             global PLAYNOW
             global CURRENT_POS_PL
+            global RADIO_MODE
 
 
             while IS_WORK == 1:
+                try: SONG = PLAYLIST[CURRENT_POS_PL]
+                except: 
+                    time.sleep(1) 
+                    continue
+                if (SONG.find('http://') != -1) and (PLAYNOW == 1) and (RADIO_MODE == 1):
+                    lsong = SONG.lower()
+                    try: ress = re.search('\.mp[34]|\.og[gm]|\.avi',lsong)
+                    except: ress = None
+
+#                    save_log('pl: '+lsong)
+
+                    if ress is not None: 
+                        RADIO_MODE = 0                    
+                        time.sleep(5)
+
+#                    save_log('rm: %d' % (RADIO_MODE))
+                    
                 if (PLAYNOW == 1)and(RADIO_MODE == 0):
                     FLAG_GET_PERCENT = 1
-                    if mpl.command('get_percent_pos')==0: break
+                    if mpl.command('get_percent_pos')==0: break                    
                     i = 0
                     while 1:
                         time.sleep(0.2)
@@ -199,6 +218,7 @@ def check_mplayer(mpl):
                 else:
                     FLAG_GET_PERCENT = 0
                     time.sleep(0.5)
+
 
     ThrdMplChecker().start()
 
@@ -235,8 +255,7 @@ def readlines_t(mpl):
                     IAM_LIVE = 1
                     for i in out:
                         fil = 0
-                        if i.find('ANS_META_ARTIST') != -1:
-                            RADIO_MODE = 0
+                        # save_log("RM: %d" % (RADIO_MODE))
                         if i.find('ICY Info:') != -1:
                             FLAG_GET_PERCENT = 2
                             RADIO_MODE = 1
@@ -321,6 +340,8 @@ def playsong_pl():
     SONG = PLAYLIST[CURRENT_POS_PL]
     if SONG.find('http://') != -1: RADIO_MODE = 1
     PLAYNOW = 1
+    SONG = SONG.strip()
+    save_log('Play: %s' % (SONG))
     MPLAYER.command('loadfile "'+SONG+'"')
     get_info_playfile()
 
@@ -909,7 +930,8 @@ def command_handler(name,params_cmd):
         else: cmd = 'seek 1 2'
 
     elif name == 'pause':
-        PLAYNOW = 0
+        if PLAYNOW == 0: PLAYNOW = 1
+        else: PLAYNOW = 0
         cmd = 'pause'
 
     elif name == 'stop':
